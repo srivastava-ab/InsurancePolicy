@@ -24,21 +24,19 @@ public class PlanServiceImpl implements PlanService {
 	public Set<String> findPlanById(String key) {
 		logger.info("inside find method, key is " + key);
 		Jedis jedis = pool.getResource();
-		// after saving the data, lets retrieve them to be sure that it has really added
-		// in redis
+		// after saving the data, lets retrieve them to be sure that it has really added in redis
 		Set<String> members = jedis.smembers(key);
-		String[] arr = null;
 		for (String member : members) {
 			System.out.println(member);
-
 		}
 		return members;
 	}
 
+	@SuppressWarnings("unchecked")
 	@Override
 	public Set<String> savePlan(String key, JsonElement root) {
 		Jedis jedis = pool.getResource();
-		logger.info("Inside save method :" + root);
+		logger.info("Inside save method :" + key);
 		Set<String> members = new HashSet<>();
 		if (jedis.exists(key)) {
 			System.out.println("Record already present");
@@ -53,16 +51,25 @@ public class PlanServiceImpl implements PlanService {
 	}
 
 	@Override
-	public void updatePlanById() {
-		// TODO Auto-generated method stub
-
+	public boolean updatePlanById(String key, JsonElement root) {
+		Jedis jedis = pool.getResource();
+		logger.info("Inside update method :" + key);
+		String members = root.toString();
+		if (!jedis.exists(key)) {
+			System.out.println("Id not found");
+			return false;
+		}
+		deletePlan(key);
+		jedis.sadd(key, members);
+		System.out.println("Updated plan is::");
+		System.out.println(jedis.smembers(key));
+		return true;
 	}
 
 	@Override
 	public Long deletePlan(String key) {
-
 		Jedis jedis = pool.getResource();
 		return jedis.del(key);
-
 	}
+
 }
