@@ -1,5 +1,7 @@
 package com.example.abhinav.controller;
 
+import static org.hamcrest.CoreMatchers.instanceOf;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -12,6 +14,8 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import javax.validation.Valid;
+
+import org.apache.commons.collections.iterators.EntrySetMapIterator;
 import org.apache.commons.io.IOUtils;
 import org.everit.json.schema.Schema;
 import org.everit.json.schema.ValidationException;
@@ -37,6 +41,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.reflect.TypeToken;
 
 @Controller
@@ -80,7 +85,11 @@ public class RestApiController {
 	@RequestMapping(value = "/InsurancePlan/testPlan")
 	public ResponseEntity<?> testPlan(@Valid @RequestBody String jsonString) throws Exception {
 		logger.info("Creating plan testing....");
-		parseJson(jsonString);
+
+		Type mapType = new TypeToken<Map<String, Object>>() {
+		}.getType();
+		Map<String, Object> root = new Gson().fromJson(jsonString, mapType);
+		parseJson(jsonString, root);
 
 		return new ResponseEntity<String>("ABC", HttpStatus.CREATED);
 	}
@@ -139,84 +148,61 @@ public class RestApiController {
 		return new ResponseEntity<String>("Validation failed for input payload", HttpStatus.NOT_ACCEPTABLE);
 	}
 
-	public void parseJson(String jsonString) throws JSONException {
-		
-		Type mapType = new TypeToken<Map<String, Object>>(){}.getType();  
-		Map<String, Object> root = new Gson().fromJson(jsonString, mapType);
-		System.out.println("Length:: "+root.size());
-		for (Entry<String, Object> entry : root.entrySet()) {
-			System.out.println("---------------------------------------");
-			System.out.println("Key = " + entry.getKey() + ", Value = " + entry.getValue());
-			if(entry.getValue() instanceof List) {
-				System.out.println("Inside List");
-				checkList((List<Object>) entry.getValue());
-				
+	public void parseJson(String jsonString, Map<String, Object> root) throws JSONException {
+
+		System.out.println(root);
+		HashMap<String, Object> saveMap = new HashMap<>();
+		for (Entry<String, Object> rootMap : root.entrySet()) {
+			if (rootMap.getValue() instanceof Map) {
+				checkMap((Map<String, Object>) rootMap.getValue());
+			} else if (rootMap.getValue() instanceof List) {
+				checkList((List<Object>) rootMap.getValue());
 			}
-			else if(entry.getValue() instanceof Map) {
-				System.out.println("The list has map");
-				checkMap((Map<String, Object>) entry.getValue());
+			else if(!(rootMap.getValue() instanceof List) && !(rootMap.getValue() instanceof Map)) {
+				saveMap.put(rootMap.getKey(), rootMap.getValue());
 			}
-		    System.out.println("---------------------------------------");
 		}
-		
+		save(saveMap);
+		saveMap.clear();
 	}
-	
+
 	public void checkMap(Map<String, Object> map) {
-		System.out.println("Inside map chk");
-		for (Entry<String, Object> entryListMap :  map.entrySet()) {
-			if(entryListMap.getValue() instanceof List) {
-				System.out.println("444");
-				checkList((List<Object>) entryListMap.getValue());
+		HashMap<String, Object> saveMap = new HashMap<>();
+		for (Entry<String, Object> tmpMap : map.entrySet()) {
+			if (tmpMap.getValue() instanceof Map) {
+				checkMap((Map<String, Object>) tmpMap.getValue());
+			} else if (tmpMap.getValue() instanceof List) {
+				checkList((List<Object>) tmpMap.getValue());
 			}
-			else if(entryListMap.getValue() instanceof Map) {
-				System.out.println("555");
-				
-				checkMap((Map<String, Object>) entryListMap.getValue());
+			
+			else if(!(tmpMap.getValue() instanceof List) && !(tmpMap.getValue() instanceof Map)) {
+				saveMap.put(tmpMap.getKey(), tmpMap.getValue());
 			}
-			System.out.println("\t\t\t^^^^^^^^^^^^^^");
-			System.out.println("\t\t\tKey = " + entryListMap.getKey() + ", Value = " + entryListMap.getValue());
-			System.out.println("\t\t\t^^^^^^^^^^^^^^");
 		}
+		save(saveMap);
+		saveMap.clear();
+
 	}
-	
-	public void checkList(List<Object> list) {
-		System.out.println("333");
-		for(Object obj : list) {
-			if(obj instanceof Map) {
-				System.out.println("111");
-				
-				checkMap((Map<String, Object>) obj);
+
+	public void checkList(List<Object> listMap) {
+		for (Object tmpMap : listMap) {
+			if (tmpMap instanceof Map) {
+				System.out.println("List has a map, redirecting to checkMap()");
+				checkMap((Map<String, Object>) tmpMap);
+				//listMap.remove(tmpMap);
 			}
-			else if(obj instanceof List) {
-				System.out.println("222");
-				checkList((List<Object>) obj);
-			}
-			System.out.println(obj.toString());
+
+			// save(listMap);
+
+			// save the remaining item in listMap
 		}
-		
+
 	}
-	
-	
 
 	public void save(Map<String, Object> parsedMap) {
-
+		System.out.println("Map:: " + parsedMap);
 	}
 
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
 	// JsonArray ele = root.getagetAsJsonArray("linkedPlanServices");
 	// System.out.println(ele);
 	// System.out.println(root.getAsJsonPrimitive());
