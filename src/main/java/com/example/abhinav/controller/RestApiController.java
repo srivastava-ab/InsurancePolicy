@@ -5,12 +5,19 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Type;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
+import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 
 import org.apache.commons.io.IOUtils;
@@ -34,6 +41,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 import com.example.abhinav.service.PlanService;
+import com.example.abhinav.util.EncryptionUtil;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -44,49 +52,45 @@ public class RestApiController {
 
 	public static final Logger logger = LoggerFactory.getLogger(RestApiController.class);
 	String _VALIDATION_FAILED = "validation failed";
+	EncryptionUtil encUtil = new EncryptionUtil();
+
 	@Autowired
 	PlanService planService;
 
 	@GetMapping
-	@RequestMapping(value = "/InsurancePlan/getPlan/{id}")
+	@RequestMapping(value = "/InsurancePlan/plan/{id}")
 	public ResponseEntity<?> getPlan(@PathVariable("id") String _id) {
 		logger.info("Fetching Plan with id {}", _id);
-		// Get the plan by its key
-		Set<String> set = planService.findPlanById(_id);
-		if (set.size() < 1) {
-			logger.error("Plan with id {} not found.", _id);
-			return new ResponseEntity<String>("Plan with id " + _id + " not found", HttpStatus.NOT_FOUND);
+		String set = planService.findPlanById("plan__"+_id);
+		if(set.equalsIgnoreCase("not found")) {
+			return new ResponseEntity<String>("Id not found", HttpStatus.NOT_FOUND);
 		}
 		return new ResponseEntity<String>(set.toString(), HttpStatus.OK);
 	}
 
 	@PostMapping
 	@RequestMapping(value = "/InsurancePlan/createPlan")
-	public ResponseEntity<?> createPlan(@Valid @RequestBody String jsonString) throws Exception {
-		logger.info("Creating plan....");
-		// parseJson(jsonString);
-		JsonElement root = new JsonParser().parse(jsonString);
-		if (validateJson(root.toString()).equalsIgnoreCase(_VALIDATION_FAILED)) {
-			return validationMessage();
-		}
-		Set<String> set = planService.savePlan(root.getAsJsonObject().get("objectId").getAsString(), root);
-		if (set.isEmpty()) {
-			return new ResponseEntity<String>("Plan already present", HttpStatus.BAD_REQUEST);
-		}
-		return new ResponseEntity<String>(set.toString(), HttpStatus.CREATED);
-	}
-
-	@PostMapping
-	@RequestMapping(value = "/InsurancePlan/testPlan")
-	public ResponseEntity<?> testPlan(@Valid @RequestBody String jsonString) throws Exception {
+	public ResponseEntity<?> testPlan(HttpServletRequest request, @Valid @RequestBody String jsonString) {
 		logger.info("Creating plan testing....");
-
-		Type mapType = new TypeToken<Map<String, Object>>() {
-		}.getType();
-		Map<String, Object> root = new Gson().fromJson(jsonString, mapType);
-		parseJson(root);
-
-		return new ResponseEntity<String>("ABC", HttpStatus.CREATED);
+		String bearerToken = request.getHeader("Authorization");
+		String newRootKey = null;
+		try {
+			if(!encUtil.decrypt(bearerToken)) {
+				return new ResponseEntity<String>("Invalid bearer token", HttpStatus.UNAUTHORIZED);
+			}
+			JsonElement rootValidation = new JsonParser().parse(jsonString);
+			if (validateJson(rootValidation.toString()).equalsIgnoreCase(_VALIDATION_FAILED)) {
+				return validationMessage();
+			}
+			Type mapType = new TypeToken<Map<String, Object>>() {
+			}.getType();
+			Map<String, Object> root = new Gson().fromJson(jsonString, mapType);
+			newRootKey = parseJson(root).split("__")[1];
+		}  catch (Exception e) {
+			e.printStackTrace();
+			return new ResponseEntity<String>("Bad processing", HttpStatus.PROCESSING);
+		}
+		return new ResponseEntity<String>("RootKey:: "+ newRootKey, HttpStatus.CREATED);
 	}
 
 	@PutMapping
@@ -104,9 +108,6 @@ public class RestApiController {
 		return new ResponseEntity<String>("Bad request", HttpStatus.BAD_REQUEST);
 	}
 
-	
-	
-	
 	@DeleteMapping
 	@RequestMapping(value = "/InsurancePlan/deletePlan/{id}")
 	public ResponseEntity<?> deletePlan(@PathVariable("id") String _id) {
@@ -125,9 +126,7 @@ public class RestApiController {
 			String filePath = ".\\src\\main\\resources\\schema.json";
 			File file = new File(filePath);
 			InputStream inputStream = new FileInputStream(file);
-			String jsonTxt = IOUtils.toString(inputStream);
-			JSONObject jsonSchema = new JSONObject(jsonTxt);
-			// JSONObject rawSchema = jsonSchema;
+			JSONObject jsonSchema = new JSONObject(IOUtils.toString(inputStream));
 			Schema schema = SchemaLoader.load(jsonSchema);
 			schema.validate(new JSONObject(jsonString.toString())); // throws a ValidationException if this object is
 																	// invalid
@@ -146,77 +145,99 @@ public class RestApiController {
 		return new ResponseEntity<String>("Validation failed for input payload", HttpStatus.NOT_ACCEPTABLE);
 	}
 
-	@SuppressWarnings({ "unchecked", "rawtypes" })
-	public void parseJson(Map<String, Object> root) throws JSONException {
+	@SuppressWarnings("unchecked")
+	public String parseJson(Map<String, Object> root) throws JSONException {
+		logger.info("Parsing payload");
 		HashMap<String, Object> childObjectMap = new HashMap<>();
 		HashMap<String, ArrayList<String>> childObjectList = new HashMap<>();
 		HashMap<String, Object> rootMapAttributes = new HashMap<>();
 		JSONObject rootObj = new JSONObject((Map) root);
+		String rootKey1 = null;
+		String rootKey2 = null;
 		for (Entry<String, Object> rootMap : root.entrySet()) {
 
 			if (rootMap.getValue() instanceof Map) {
 				checkMap((Map<String, Object>) rootMap.getValue());
 				JSONObject obj = new JSONObject((Map) rootMap.getValue());
-				childObjectMap.put(rootObj.get("objectType") + "____" + rootObj.get("objectId") + "____" + rootMap.getKey(), obj.get("objectType") + "____" + obj.get("objectId"));
-				System.out.println("Set1:::: " + childObjectMap);
+				rootKey2 = rootObj.get("objectType") + "__" + rootObj.get("objectId") + "__" + rootMap.getKey();
+				childObjectMap.put(rootKey2, obj.get("objectType") + "__" + obj.get("objectId"));
+				System.out.println("Set::::1 " + childObjectMap);
+				saveRelationshipMap(childObjectMap);
+				childObjectMap.clear();
 			} else if (rootMap.getValue() instanceof List) {
-				String key = rootObj.get("objectType") + "____" + rootObj.get("objectId") + "____" +rootMap.getKey();
+				String key = rootObj.get("objectType") + "__" + rootObj.get("objectId") + "__" + rootMap.getKey();
+				rootKey1 = key;
 				checkList((List<Object>) rootMap.getValue(), key);
-				//JSONObject obj = new JSONObject((Map) rootMap.getValue());
-				System.out.println("List name:: "+ rootObj.get("objectType") + "____" + rootObj.get("objectId") + "____" +rootMap.getKey());				
 			} else if (!(rootMap.getValue() instanceof List) && !(rootMap.getValue() instanceof Map)) {
 				rootMapAttributes.put(rootMap.getKey(), rootMap.getValue());
 			}
 		}
-		save(rootMapAttributes);
+		ArrayList<String> rootKeyList = new ArrayList<>();
+		rootKeyList.add(rootKey1);
+		rootKeyList.add(rootKey2);
+		childObjectMap.put(rootObj.get("objectType") + "__" + rootObj.get("objectId")+"__", rootKeyList);
+		System.out.println("Set::::4 "+childObjectMap);
+		saveRelationshipMap(childObjectMap);
+		String rootKey = saveJsonObject(rootMapAttributes);
+		return rootKey;
 	}
-	
 
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	public void checkMap(Map<String, Object> map) throws JSONException {
 		HashMap<String, Object> saveMap = new HashMap<>();
 		HashMap<String, Object> childObjectMap = new HashMap<>();
 		JSONObject rootObj = new JSONObject((Map) map);
-		//System.out.println("Lis222t--> "+map.toString());
 		for (Entry<String, Object> tmpMap : map.entrySet()) {
 			if (tmpMap.getValue() instanceof Map) {
 				checkMap((Map<String, Object>) tmpMap.getValue());
 				JSONObject obj = new JSONObject((Map) tmpMap.getValue());
-				// System.out.println("Obj:: "+obj);
-				childObjectMap.put(	rootObj.get("objectType") + "____" + rootObj.get("objectId") + "____" + tmpMap.getKey(), obj.get("objectType") + "____" + obj.get("objectId"));
-				System.out.println("Set:::: " + childObjectMap);
+				childObjectMap.put(
+						rootObj.get("objectType") + "__" + rootObj.get("objectId") + "__" + tmpMap.getKey(),
+						obj.get("objectType") + "__" + obj.get("objectId"));
 			} else if (tmpMap.getValue() instanceof List) {
 				checkList((List<Object>) tmpMap.getValue(), null);
 			} else if (!(tmpMap.getValue() instanceof List) && !(tmpMap.getValue() instanceof Map)) {
 				saveMap.put(tmpMap.getKey(), tmpMap.getValue());
 			}
 		}
-		save(saveMap);
-		saveMap.clear();
+		if (!childObjectMap.isEmpty()) {
+			saveRelationshipMap(childObjectMap);
+			System.out.println("Set::::2 " + childObjectMap);
+		}
+		saveJsonObject(saveMap);
 
 	}
 
 	@SuppressWarnings("unchecked")
 	public void checkList(List<Object> listMap, String keyName) throws JSONException {
-		HashMap<String, ArrayList<String>> childObjectMap = new HashMap<>();
-		ArrayList< String> tmpList = new ArrayList<>();
+		HashMap<String, Object> childObjectMap = new HashMap<>();
+		ArrayList<String> tmpList = new ArrayList<>();
 		for (Object tmpMap : listMap) {
 			if (tmpMap instanceof Map) {
-				//System.out.println("List--> "+tmpMap.toString());
 				JSONObject rootObj = new JSONObject((Map) tmpMap);
-				tmpList.add(rootObj.get("objectType")+"____"+rootObj.get("objectId"));
-				
+				Set<String> key = new Gson().fromJson(rootObj.toString(), HashMap.class).keySet();
+				Object[] keyList = key.toArray();
+				tmpList.add(rootObj.get("objectType") + "__" + rootObj.get("objectId") + "__" + keyList[0]);
+				tmpList.add(rootObj.get("objectType") + "__" + rootObj.get("objectId") + "__" + keyList[1]);
+				tmpList.add(rootObj.get("objectType") + "__" + rootObj.get("objectId"));
 				childObjectMap.put(keyName, tmpList);
-			
+
 				checkMap((Map<String, Object>) tmpMap);
 			}
 		}
-		System.out.println("ChildObjList::"+childObjectMap.toString());
+		saveRelationshipMap(childObjectMap);
+		System.out.println("Set::::3 " + childObjectMap.toString());
 	}
 
-	public void save(HashMap<String, Object> parsedMap) {
-		// System.out.println("Map:: " + parsedMap);
-		planService.savePlanInMap(parsedMap);
+	public String saveJsonObject(HashMap<String, Object> parsedMap) {
+		return planService.savePlanObjMap(parsedMap);
 	}
-
+	
+	public void saveRelationshipMap(HashMap<String, Object> relationshipMap) {
+		try {
+			planService.saveRelationshipMap(relationshipMap);
+		} catch (JSONException e) {
+			e.printStackTrace();
+		}
+	}
 }
