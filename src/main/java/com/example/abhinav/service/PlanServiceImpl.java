@@ -1,13 +1,14 @@
 package com.example.abhinav.service;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.stream.Collectors;
 
-import org.apache.commons.collections.iterators.EntrySetMapIterator;
 import org.apache.commons.lang.StringUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -15,6 +16,7 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.example.abhinav.elasticsearch.ElasticSearchUtility;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
@@ -36,15 +38,6 @@ public class PlanServiceImpl implements PlanService {
 		pool = new JedisPool(redisHost, redisPort);
 		jedis = pool.getResource();
 	}
-
-	/*
-	 * @Override public Set<String> findPlanById(String key) {
-	 * logger.info("inside find method, key is " + key); Jedis jedis =
-	 * pool.getResource(); // after saving the data, lets retrieve them to be sure
-	 * that it has really added // in redis Set<String> members =
-	 * jedis.smembers(key); for (String member : members) {
-	 * System.out.println(member); } return members; }
-	 */
 
 	@SuppressWarnings("unchecked")
 	@Override
@@ -82,7 +75,10 @@ public class PlanServiceImpl implements PlanService {
 
 	@Override
 	public Long deletePlan(String key) {
-		return jedis.del(key);
+		ElasticSearchUtility esu = new ElasticSearchUtility();
+		esu.delIndex(key);
+		jedis.del("plan__" + key + "__");
+		return jedis.del("plan__" + key);
 	}
 
 	@Override
@@ -101,13 +97,17 @@ public class PlanServiceImpl implements PlanService {
 		}
 		String key = newMap.get("objectType") + "__" + newMap.get("objectId");
 		if (jedis.exists(key)) {
-			// System.out.println("Record already present");
-			// return members;
+
 		}
-		// System.out.println("****************");
-		// System.out.println("Key--> "+key+ " :: Value--> "+newMap);
-		// System.out.println("****************");
 		String output = jedis.hmset(key, newMap);
+		ElasticSearchUtility eu = new ElasticSearchUtility();
+		try {
+			System.out.println("Going to ES REQ");
+			eu.req(map);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
 		return newMap.get("objectType") + "__" + newMap.get("objectId");
 	}
 
@@ -122,13 +122,12 @@ public class PlanServiceImpl implements PlanService {
 		}
 	}
 
-	@SuppressWarnings("unchecked")
 	@Override
 	public String findPlanById(String str) {
 		ArrayList<String> nodeList = new ArrayList<>();
 		JSONObject rootObj = new JSONObject();
 		String prettyJsonString = null;
-		if(checkSet(str + "__", nodeList).size()==1) {
+		if (checkSet(str + "__", nodeList).size() == 1) {
 			return "not found";
 		}
 		try {
@@ -136,30 +135,26 @@ public class PlanServiceImpl implements PlanService {
 			jsonMap.putAll((Map<? extends String, ? extends Object>) checkMap(str));
 			JSONArray array = new JSONArray();
 			JSONObject obj1 = new JSONObject();
-			JSONObject obj2 = new JSONObject();
-			for (int i = 0; i < nodeList.size(); i++) {
-				if (i == 0) {
+			int nodeSize = nodeList.size() - 1;
+			for (int i = 0; i <= nodeSize; i++) {
+				if (i % 3 == 0 && i != nodeSize) {
 					obj1.put("linkedService", checkMap(nodeList.get(i)));
-				} else if (i == 1) {
+				} else if (i % 3 == 1 && i != nodeSize) {
 					obj1.put("planserviceCostShares", checkMap(nodeList.get(i)));
-				} else if (i == 2) {
+				} else if (i % 3 == 2 && i != nodeSize) {
 					obj1 = putMapInObj(checkMap(nodeList.get(i)), obj1);
-				} else if (i == 3) {
-					obj2.put("linkedService", checkMap(nodeList.get(i)));
-				} else if(i==4){
-					obj2.put("planserviceCostShares", checkMap(nodeList.get(i)));
-				} else if(i==5){
-					obj2 = putMapInObj(checkMap(nodeList.get(i)), obj2);
-				} else if(i==6){
+					array.put(obj1);
+					obj1 = new JSONObject();
+				} else if (i == nodeSize) {
 					jsonMap.put("planCostShares", checkMap(nodeList.get(i)));
 				}
 			}
-			array.put(obj1);
-			array.put(obj2);
+
 			jsonMap.put("linkedPlanServices", array);
 			rootObj.put("test", jsonMap);
 			Gson gson = new GsonBuilder().setPrettyPrinting().create();
 			JsonParser jp = new JsonParser();
+			System.out.println("root is:: " + rootObj);
 			JsonElement je = jp.parse(rootObj.get("test").toString());
 			prettyJsonString = gson.toJson(je);
 		} catch (JSONException e) {
@@ -196,13 +191,22 @@ public class PlanServiceImpl implements PlanService {
 		}
 		return abc;
 	}
-	
+
 	public JSONObject putMapInObj(Map<String, String> map, JSONObject obj) throws JSONException {
-		
-		for(Entry<String, String > entry: map.entrySet()) {
+
+		for (Entry<String, String> entry : map.entrySet()) {
 			obj.put(entry.getKey(), entry.getValue());
 		}
 		return obj;
 	}
 
+	public boolean updateObject(Map<String, Object> map) {
+		Map<String, String> newMap = map.entrySet().stream()
+				.collect(Collectors.toMap(Map.Entry::getKey, e -> (String) e.getValue()));
+		String key = newMap.get("objectType") + "__" + newMap.get("objectId");
+		System.out.println("Map:: " + newMap);
+		String output = jedis.hmset(key, newMap);
+		return true;
+
+	}
 }
