@@ -26,7 +26,7 @@ public class EncryptionUtil {
 	private static String algorithm = "DESede";
 	public static String KEY = "src/main/resources/" + "key";
 
-	public boolean decrypt(String authKey){
+	public boolean decrypt(String authKey) {
 		String decryptedText = null;
 		try {
 			SecretKey spec = loadKey(new File(KEY));
@@ -36,17 +36,18 @@ public class EncryptionUtil {
 		} catch (IOException e) {
 			e.printStackTrace();
 			return false;
-		}catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | BadPaddingException | IllegalBlockSizeException e) {
+		} catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | BadPaddingException
+				| IllegalBlockSizeException | NullPointerException e) {
 			e.printStackTrace();
 			return false;
-		}		
-		System.out.println("encryptedText:: "+encryptedText);
-		System.out.println("decryptedText:: "+decryptedText);
+		}
+		// System.out.println("encryptedText:: "+encryptedText);
+		// System.out.println("decryptedText:: "+decryptedText);
 		return encryptedText.equalsIgnoreCase(decryptedText) ? true : false;
 	}
 
-	static String decryptF(byte[] encryptionBytes, Key pkey, Cipher c) throws InvalidKeyException,
-			BadPaddingException, IllegalBlockSizeException {
+	static String decryptF(byte[] encryptionBytes, Key pkey, Cipher c)
+			throws InvalidKeyException, BadPaddingException, IllegalBlockSizeException {
 		c.init(Cipher.DECRYPT_MODE, pkey);
 		byte[] decrypt = c.doFinal(encryptionBytes);
 		return new String(decrypt);

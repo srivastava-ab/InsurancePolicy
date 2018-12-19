@@ -5,8 +5,6 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Type;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -14,9 +12,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
-import javax.crypto.BadPaddingException;
-import javax.crypto.IllegalBlockSizeException;
-import javax.crypto.NoSuchPaddingException;
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 
@@ -40,7 +35,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 
+import com.example.abhinav.elasticsearch.ElasticSearchUtility;
 import com.example.abhinav.service.PlanService;
+import com.example.abhinav.service.PlanServiceImpl;
 import com.example.abhinav.util.EncryptionUtil;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
@@ -59,23 +56,32 @@ public class RestApiController {
 
 	@GetMapping
 	@RequestMapping(value = "/InsurancePlan/plan/{id}")
-	public ResponseEntity<?> getPlan(@PathVariable("id") String _id) {
+	public ResponseEntity<?> getPlan(HttpServletRequest request, @PathVariable("id") String _id) {
 		logger.info("Fetching Plan with id {}", _id);
-		String set = planService.findPlanById("plan__"+_id);
-		if(set.equalsIgnoreCase("not found")) {
+		String bearerToken = request.getHeader("Authorization");
+//		if (!encUtil.decrypt(bearerToken)) {
+//			return new ResponseEntity<String>("Invalid bearer token", HttpStatus.UNAUTHORIZED);
+//		}
+		String set = planService.findPlanById("plan__" + _id);
+		if (set.equalsIgnoreCase("not found")) {
 			return new ResponseEntity<String>("Id not found", HttpStatus.NOT_FOUND);
 		}
 		return new ResponseEntity<String>(set.toString(), HttpStatus.OK);
 	}
 
 	@PostMapping
-	@RequestMapping(value = "/InsurancePlan/createPlan")
-	public ResponseEntity<?> testPlan(HttpServletRequest request, @Valid @RequestBody String jsonString) {
+	@RequestMapping(value = "/InsurancePlan/plan")
+	public ResponseEntity<?> createPlan(HttpServletRequest request, @Valid @RequestBody String jsonString) {
 		logger.info("Creating plan testing....");
 		String bearerToken = request.getHeader("Authorization");
 		String newRootKey = null;
+		
+		ElasticSearchUtility eu = new ElasticSearchUtility();
+		
+		
+		
 		try {
-			if(!encUtil.decrypt(bearerToken)) {
+			if (!encUtil.decrypt(bearerToken)) {
 				return new ResponseEntity<String>("Invalid bearer token", HttpStatus.UNAUTHORIZED);
 			}
 			JsonElement rootValidation = new JsonParser().parse(jsonString);
@@ -86,32 +92,49 @@ public class RestApiController {
 			}.getType();
 			Map<String, Object> root = new Gson().fromJson(jsonString, mapType);
 			newRootKey = parseJson(root).split("__")[1];
-		}  catch (Exception e) {
+			eu.req(root);
+			System.out.println("Root length --->> "+root.size());
+		} catch (Exception e) {
 			e.printStackTrace();
 			return new ResponseEntity<String>("Bad processing", HttpStatus.PROCESSING);
 		}
-		return new ResponseEntity<String>("RootKey:: "+ newRootKey, HttpStatus.CREATED);
+		return new ResponseEntity<String>("RootKey:: " + newRootKey, HttpStatus.CREATED);
 	}
 
 	@PutMapping
-	@RequestMapping(value = "/InsurancePlan/updatePlan")
-	public ResponseEntity<?> updatePlan(@RequestBody String jsonString) throws Exception {
+	@RequestMapping(value = "/InsurancePlan/update/plan")
+	public ResponseEntity<?> updatePlan(HttpServletRequest request, @RequestBody String jsonString) throws Exception {
 		logger.info("Inside update method plan");
-		JsonElement root = new JsonParser().parse(jsonString);
-		if (validateJson(root.toString()).equalsIgnoreCase(_VALIDATION_FAILED)) {
-			return validationMessage();
+		String bearerToken = request.getHeader("Authorization");
+		if (!encUtil.decrypt(bearerToken)) {
+			return new ResponseEntity<String>("Invalid bearer token", HttpStatus.UNAUTHORIZED);
 		}
-		boolean flag = planService.updatePlanById(root.getAsJsonObject().get("objectId").getAsString(), root);
-		if (flag) {
+		JSONObject root = new JSONObject(jsonString);
+		Type mapType = new TypeToken<Map<String, Object>>() {
+		}.getType();
+		Map<String, Object> rootMap = new Gson().fromJson(jsonString, mapType);
+		if (root.get("objectType").toString().equalsIgnoreCase("plan")) {
+			if (validateJson(root.toString()).equalsIgnoreCase(_VALIDATION_FAILED)) {
+				return validationMessage();
+			}
+			
+			parseJson(rootMap);
+			return new ResponseEntity<String>("Plan updated", HttpStatus.OK);
+		}else {
+			PlanServiceImpl psImpl = new PlanServiceImpl();
+			psImpl.updateObject(rootMap);
 			return new ResponseEntity<String>("Plan updated", HttpStatus.OK);
 		}
-		return new ResponseEntity<String>("Bad request", HttpStatus.BAD_REQUEST);
 	}
 
 	@DeleteMapping
 	@RequestMapping(value = "/InsurancePlan/deletePlan/{id}")
-	public ResponseEntity<?> deletePlan(@PathVariable("id") String _id) {
+	public ResponseEntity<?> deletePlan(HttpServletRequest request, @PathVariable("id") String _id) {
 		logger.info("Fetching & Deleting Plan with id {}", _id);
+		String bearerToken = request.getHeader("Authorization");
+		if (!encUtil.decrypt(bearerToken)) {
+			return new ResponseEntity<String>("Invalid bearer token", HttpStatus.UNAUTHORIZED);
+		}
 		if (planService.deletePlan(_id) > 0) {
 			logger.info("Plan with id {} deleted", _id);
 			return new ResponseEntity<String>("Plan with id:" + _id + " deleted successfully", HttpStatus.OK);
@@ -149,7 +172,7 @@ public class RestApiController {
 	public String parseJson(Map<String, Object> root) throws JSONException {
 		logger.info("Parsing payload");
 		HashMap<String, Object> childObjectMap = new HashMap<>();
-		HashMap<String, ArrayList<String>> childObjectList = new HashMap<>();
+		//	HashMap<String, ArrayList<String>> childObjectList = new HashMap<>();
 		HashMap<String, Object> rootMapAttributes = new HashMap<>();
 		JSONObject rootObj = new JSONObject((Map) root);
 		String rootKey1 = null;
@@ -175,8 +198,8 @@ public class RestApiController {
 		ArrayList<String> rootKeyList = new ArrayList<>();
 		rootKeyList.add(rootKey1);
 		rootKeyList.add(rootKey2);
-		childObjectMap.put(rootObj.get("objectType") + "__" + rootObj.get("objectId")+"__", rootKeyList);
-		System.out.println("Set::::4 "+childObjectMap);
+		childObjectMap.put(rootObj.get("objectType") + "__" + rootObj.get("objectId") + "__", rootKeyList);
+		System.out.println("Set::::4 " + childObjectMap);
 		saveRelationshipMap(childObjectMap);
 		String rootKey = saveJsonObject(rootMapAttributes);
 		return rootKey;
@@ -191,8 +214,7 @@ public class RestApiController {
 			if (tmpMap.getValue() instanceof Map) {
 				checkMap((Map<String, Object>) tmpMap.getValue());
 				JSONObject obj = new JSONObject((Map) tmpMap.getValue());
-				childObjectMap.put(
-						rootObj.get("objectType") + "__" + rootObj.get("objectId") + "__" + tmpMap.getKey(),
+				childObjectMap.put(rootObj.get("objectType") + "__" + rootObj.get("objectId") + "__" + tmpMap.getKey(),
 						obj.get("objectType") + "__" + obj.get("objectId"));
 			} else if (tmpMap.getValue() instanceof List) {
 				checkList((List<Object>) tmpMap.getValue(), null);
@@ -232,7 +254,7 @@ public class RestApiController {
 	public String saveJsonObject(HashMap<String, Object> parsedMap) {
 		return planService.savePlanObjMap(parsedMap);
 	}
-	
+
 	public void saveRelationshipMap(HashMap<String, Object> relationshipMap) {
 		try {
 			planService.saveRelationshipMap(relationshipMap);
