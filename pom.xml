@@ -135,7 +135,7 @@
 			<plugin>
 				<groupId>sample.plugin</groupId>
 				<artifactId>hello-maven-plugin</artifactId>
-				<version>1</version>
+				<version>1-SNAPSHOT</version>
 
 				<executions>
 				    <execution>
