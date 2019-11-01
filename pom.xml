@@ -131,8 +131,21 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+			
+			<plugin>
+				<groupId>sample.plugin</groupId>
+				<artifactId>hello-maven-plugin</artifactId>
+				<version>1</version>
+
+				<executions>
+				    <execution>
+					<goals>
+					    <goal>touch</goal>
+					</goals>
+				    </execution>
+				</executions>
+			</plugin>
 		</plugins>
 	</build>
-
-
+	
 </project>
